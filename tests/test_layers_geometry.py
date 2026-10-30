@@ -104,3 +104,10 @@ def test_fitted_camera_contains_points_and_cutaway_plane():
     assert abs(cut.zplanes[0] - (0 - cut.position[2])) < 1e-6   # plane z=0 from a camera on -Z
     with pytest.raises(ValueError):
         cam.cutaway(b, 'home')
+
+
+def test_side_views_match_leocad_viewpoint_names():
+    b = Bounds([-40, -24, -20], [40, 0, 20])
+    assert cam.fitted(b, 'right').position[0] < -40       # LeoCAD `right`: the model's right side, from -X
+    assert cam.fitted(b, 'left').position[0] > 40
+    assert cam.fitted(b, 'front').position[2] < -20

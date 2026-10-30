@@ -17,6 +17,15 @@ def test_blocks_lines_and_steps(model):
     assert list(doc.parents_of('wing.ldr')) == ['root.ldr']
 
 
+def test_description_starting_with_step_is_not_a_step(tmp_path):
+    path = tmp_path / 'steps.ldr'
+    path.write_text('0 Steps 70 to 90\n0 Name: steps.ldr\n1 4 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat\n'
+                    '0 STEP\n0 ROTSTEP 35 55 0 ABS\n1 4 0 -24 0 1 0 0 0 1 0 0 0 1 3001.dat\n')
+    block = Document.read(path).root
+    assert [p.step for p in block.placements()] == [1, 3]
+    assert block.header() == ['0 Steps 70 to 90', '0 Name: steps.ldr']
+
+
 def test_single_ldr(tmp_path):
     path = tmp_path / 'plain.ldr'
     path.write_text('0 Plain\n1 4 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat\n')

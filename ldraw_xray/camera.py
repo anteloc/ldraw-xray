@@ -13,8 +13,10 @@ import numpy as np
 from .validation import boolean, fields, number, vector
 
 VIEWS = ('home', 'front', 'back', 'left', 'right', 'top', 'bottom')
-DIRECTIONS = {'home': (1, -1, -1), 'front': (0, 0, -1), 'back': (0, 0, 1), 'left': (-1, 0, 0),
-              'right': (1, 0, 0), 'top': (0, -1, 0), 'bottom': (0, 1, 0)}
+# From the target toward the camera, matching LeoCAD's --viewpoint names (measured on
+# 25.09): `right` shows the model's right side from -X, `left` its left side from +X.
+DIRECTIONS = {'home': (1, -1, -1), 'front': (0, 0, -1), 'back': (0, 0, 1), 'left': (1, 0, 0),
+              'right': (-1, 0, 0), 'top': (0, -1, 0), 'bottom': (0, 1, 0)}
 
 
 @dataclass(frozen=True)

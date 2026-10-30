@@ -299,3 +299,12 @@ def test_documentation_examples(stub_session, model, tmp_path, monkeypatch):
         namespace = {}
         exec(block, namespace)
         assert all(image.is_file() for image in namespace['images'])
+
+
+def test_step_label_names_each_step_once_in_ascii():
+    from ldraw_xray.board import step_label
+    assert step_label('Isolated', None) == 'Isolated'
+    assert step_label('Wing build', 3) == 'Wing build, step 3'
+    assert step_label('Source step 6: arms', 6) == 'Source step 6: arms'
+    assert step_label('Source steps 1-2: belly', 2) == 'Source steps 1-2: belly'
+    assert step_label('Source step 61: roof', 6) == 'Source step 61: roof, step 6'

@@ -97,8 +97,9 @@ LDraw −Y is up; the front view looks toward +Z. Axis points, directions, and
 lengths use section coordinates and LDraw units. Axis records include the axes
 transformed into each parent placement.
 
-Views are `home`, `front`, `back`, `left`, `right`, `top`, and `bottom`. Normal
-views fit the part bounds. Steps of a panel share a camera and scale. Cutaways
+Views are `home`, `front`, `back`, `left`, `right`, `top`, and `bottom`, named
+as in LeoCAD: `right` shows the model's right side from −X, `left` its left side
+from +X. Normal views fit the part bounds. Steps of a panel share a camera and scale. Cutaways
 require an axis-aligned view: depth 0 is the nearest face, depth 1 the farthest.
 Cut surfaces are not capped.
 

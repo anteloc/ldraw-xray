@@ -11,7 +11,10 @@ from pathlib import Path
 
 import numpy as np
 
-STEP_META = ('0 STEP', '0 ROTSTEP')
+def is_step(line):
+    """`0 STEP` or `0 ROTSTEP ...`; a description such as `0 Steps 70 to 90` is not one."""
+    t = line.split()
+    return len(t) > 1 and t[0] == '0' and t[1].upper() in ('STEP', 'ROTSTEP')
 
 
 def key(name):
@@ -70,7 +73,7 @@ class Block:
         step, result = 1, []
         for offset, raw in enumerate(self.lines):
             s = raw.strip()
-            if s.upper().startswith(STEP_META):
+            if is_step(s):
                 step += 1
                 continue
             p = Placement.parse(s, self.first_line + offset, step)
@@ -83,7 +86,7 @@ class Block:
         out = []
         for raw in self.lines:
             s = raw.strip()
-            if s.startswith('1 ') or s.upper().startswith(STEP_META):
+            if s.startswith('1 ') or is_step(s):
                 break
             out.append(raw)
         return out

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -163,6 +164,14 @@ def _legend(recipe, panels):
     return lines
 
 
+def step_label(label, step):
+    """Name an expanded step image unless its label already does. ASCII only: the
+    default mosaic font has no dash glyphs."""
+    if step is None or re.search(rf'\bsteps? (\d+-)?{step}\b', label, re.IGNORECASE):
+        return label
+    return f'{label}, step {step}'
+
+
 def run_board(session, value, output, *, force=False, keep_intermediates=False, mosaic=None):
     boolean(force, 'force')
     boolean(keep_intermediates, 'keep_intermediates')
@@ -184,8 +193,7 @@ def run_board(session, value, output, *, force=False, keep_intermediates=False, 
             records = render_panel(session, panel.scene, panel.plan, panel.camera, staging,
                                    name=panel.name, style=style, keep_intermediates=keep_intermediates)
             for record in records:
-                suffix = f' — step {record["step"]}' if record['step'] is not None else ''
-                record['label'] = panel.label + suffix
+                record['label'] = step_label(panel.label, record['step'])
                 record['subject'] = f'{panel.scene.section}:{panel.scene.parent or "isolated"}'
                 panels.append(record)
         manifest = dict(
