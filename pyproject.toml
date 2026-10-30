@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ldraw-xray"
+version = "0.1.0"
+description = "Composable LeoCAD renders for agents with vision: highlights, x-ray, out-of-band colouring, axes, poses, cutaways and mosaics"
+readme = "README.md"
+license-files = ["LICENSE", "CC-BY-SA-4.0"]
+requires-python = ">=3.12"
+dependencies = [
+    "pyldraw3==1.7.0",
+    "numpy>=2",
+    "pillow>=11,<13",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+ldraw-xray = "ldraw_xray.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ldraw_xray*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "leocad: renders with the external LeoCAD executable",
+    "library: needs an LDraw parts library (LDRAW_DIR or LDRAWDIR)",
+    "shadow: needs an LDCad shadow library (LDRAW_SHADOW)",
+]
