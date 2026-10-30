@@ -21,7 +21,7 @@ class ConfigError(ValueError):
 def _library(value):
     path = value or os.environ.get('LDRAW_DIR') or os.environ.get('LDRAWDIR')
     if not path:
-        raise ConfigError('Set LDRAW_DIR (or LDRAWDIR) to the LDraw parts library, or pass -l/--ldraw-lib')
+        raise ConfigError('Set LDRAW_DIR (or LDRAWDIR) to the LDraw parts library, or pass --library')
     root = Path(path).expanduser().resolve()
     names = {p.name.casefold() for p in root.iterdir()} if root.is_dir() else set()
     if not {'parts', 'p', 'ldconfig.ldr'} <= names:
@@ -54,7 +54,7 @@ def _leocad(value):
     candidate = value or os.environ.get('LEOCAD')
     if candidate:
         path = Path(candidate).expanduser()
-        found = shutil.which(str(path)) or (str(path) if path.is_file() else None)
+        found = shutil.which(str(path))
         if not found:
             raise ConfigError(f'LeoCAD executable not found: {candidate}')
         return Path(found)
@@ -94,3 +94,23 @@ class XrayConfig:
         if self.leocad is None:
             raise ConfigError('LeoCAD not found: install it, put `leocad` on PATH, set LEOCAD, or pass --leocad')
         return self.leocad
+
+
+def discover(*, library=None, shadows=None, leocad=None, cache_dir=None, no_shadow=False):
+    """Inspect each setting independently, including an incomplete installation."""
+    found, errors = {}, {}
+    checks = {
+        'library': lambda: _library(library),
+        'shadows': lambda: [] if no_shadow else _shadows(shadows),
+        'leocad': lambda: _leocad(leocad),
+        'cache_dir': lambda: _cache(cache_dir),
+    }
+    for name, check in checks.items():
+        try:
+            found[name] = check()
+        except (ConfigError, OSError) as error:
+            found[name] = None
+            errors[name] = str(error)
+    if found['leocad'] is None and 'leocad' not in errors:
+        errors['leocad'] = 'LeoCAD not found; install it or set LEOCAD'
+    return found, errors

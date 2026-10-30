@@ -17,9 +17,6 @@ import numpy as np
 
 from .mpd import key
 
-LDCAD_SOURCES = None
-
-
 def _ldcad():
     from ldraw.connection_types import ConnectionSource
     return {ConnectionSource.LDCAD_SHADOW, ConnectionSource.LDCAD_INLINE}

@@ -15,8 +15,9 @@ Composition rules (LeoCAD behaviour, measured):
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Required, TypedDict
 
 import numpy as np
 
@@ -24,7 +25,8 @@ from . import camera as cam
 from .geometry import Bounds, basis_y, leaf_bounds, map_axis, rotation, stud_bucket, unit
 from .mpd import Block, Document, Placement, emit, key, step_map
 from .palette import AXIS_CODE, DIRECTION_CODES, legend, resolve
-from .select import select
+from .select import select as select_placements
+from .validation import fields, number, text, vector
 
 SYNTHETIC = '0 // ldraw-xray synthetic inspection copy: recoloured/moved/marked for rendering, not a valid model'
 
@@ -33,11 +35,10 @@ SYNTHETIC = '0 // ldraw-xray synthetic inspection copy: recoloured/moved/marked 
 class Scene:
     source: Path
     section: str
-    context: str = 'isolate'          # 'isolate' or 'parent'
-    parent: str | None = None         # parent block; default: first block that places the section
+    parent: str | None = None
 
     def to_dict(self):
-        return dict(source=str(self.source), section=self.section, context=self.context, parent=self.parent)
+        return dict(source=str(self.source), section=self.section, parent=self.parent)
 
 
 @dataclass
@@ -63,22 +64,16 @@ class Build:
         self.scene = scene
         self.parts = parts                 # pyldraw3 Parts, needed for bounds-based layers
         self.doc = Document.read(scene.source)
-        self.section = self.doc.block(scene.section)
-        if self.section.is_part:
-            raise ValueError(f'{scene.section!r} is a part definition, not a model section')
+        self.section = self.doc.model_section(scene.section)
         self.parent = None
-        if scene.context == 'parent':
-            parents = self.doc.parents_of(self.section.name)
-            name = scene.parent or next(iter(parents), None)
-            if not name:
-                raise ValueError(f'No block places {self.section.name!r}; use context isolate')
+        if scene.parent is not None:
+            name = self.doc.parent_name(self.section.name, scene.parent)
             self.parent = self.doc.block(name)
-        elif scene.context != 'isolate':
-            raise ValueError("context must be 'isolate' or 'parent'")
         self.items = {'section': self.section.placements()}
         if self.parent:
             self.items['parent'] = self.parent.placements()
         self.keep_steps = None
+        self.step_numbers = None
         self.fade = False
         self.cutaway_request = None
         self.camera = None
@@ -86,23 +81,23 @@ class Build:
         self.codes = set()
         self.records = []
         self.notes = []
-        self.markers = []
+        self._conn = None
         self.axis_requests = []
 
     # -- helpers -------------------------------------------------------------
     def scope(self, scope):
         scope = scope or ('parent' if self.parent else 'section')
         if scope == 'parent' and not self.parent:
-            raise ValueError("scope 'parent' needs context 'parent'")
+            raise ValueError("scope 'parent' needs a parent panel")
         if scope not in self.items:
             raise ValueError(f'Unknown scope {scope!r}')
         return scope
 
-    def chosen(self, scope, sel, default=None):
-        spec = sel if sel is not None else default
+    def chosen(self, scope, select, default=None):
+        spec = select if select is not None else default
         if spec is None:
-            raise ValueError('This layer needs a selection (sel=...)')
-        idx = select(spec, self.items[scope], section=self.section.name)
+            raise ValueError("This layer needs a 'select' field")
+        idx = select_placements(spec, self.items[scope], section=self.section.name)
         if not idx:
             self.notes.append(f'Selection {spec!r} matched nothing in {scope}')
         return idx, spec
@@ -135,38 +130,39 @@ class Build:
         self.records.append(dict(layer=layer, **{k: v for k, v in info.items() if v is not None}))
 
     # -- layers --------------------------------------------------------------
-    def highlight(self, sel=None, scope=None):
+    def highlight(self, select=None, scope=None):
         scope = self.scope(scope)
         default = 'section' if scope == 'parent' else None
-        idx, spec = self.chosen(scope, sel, default)
+        idx, spec = self.chosen(scope, select, default)
         self.items[scope] = [p.moved(final=True) if i in idx else p for i, p in enumerate(self.items[scope])]
-        self.record('highlight', sel=spec, scope=scope, count=len(idx))
+        self.record('highlight', select=spec, scope=scope, count=len(idx))
 
     def ghost(self):
         self.fade = True
         self.record('ghost')
 
-    def steps(self, first=None, last=None):
+    def steps(self, first=None, last=None, numbers=None):
         if self.parent:
-            raise ValueError('steps renders the isolated section; use context isolate')
+            raise ValueError('steps renders the section alone; omit parent')
         self.keep_steps = (first, last)
-        self.record('steps', first=first, last=last)
+        self.step_numbers = numbers
+        self.record('steps', first=first, last=last, numbers=numbers)
 
-    def recolour(self, sel=None, colour='group:A', scope='section', layer='recolour'):
+    def recolour(self, select=None, colour='group:A', scope='section', layer='recolour'):
         scope = self.scope(scope)
         code = resolve(colour)
-        idx, spec = self.chosen(scope, sel)
+        idx, spec = self.chosen(scope, select)
         idx = self.flatten_selected(scope, idx)
         self.items[scope] = [p.moved(colour=str(code)) if i in idx else p for i, p in enumerate(self.items[scope])]
         self.codes.add(code)
-        self.record(layer, sel=spec, scope=scope, colour=code, count=len(idx))
+        self.record(layer, select=spec, scope=scope, colour=code, count=len(idx))
 
-    def xray(self, sel=None, colour=47, scope='section'):
-        self.recolour(sel, colour, scope, layer='xray')
+    def xray(self, select=None, colour=47, scope='section'):
+        self.recolour(select, colour, scope, layer='xray')
 
-    def stud_map(self, sel='all', scope='section'):
+    def stud_map(self, select='all', scope='section'):
         scope = self.scope(scope)
-        idx, spec = self.chosen(scope, sel)
+        idx, spec = self.chosen(scope, select)
         idx = self.flatten_selected(scope, idx)
         counts = {}
         items = []
@@ -178,16 +174,16 @@ class Build:
             items.append(p)
         self.items[scope] = items
         self.codes.update(DIRECTION_CODES.values())
-        self.record('stud_map', sel=spec, scope=scope, frame=f'{scope} coordinates; LDraw -Y is up',
+        self.record('stud_map', select=spec, scope=scope, frame=f'{scope} coordinates; LDraw -Y is up',
                     counts=counts, total=sum(counts.values()))
 
-    def pose(self, sel=None, point=(0, 0, 0), direction=(0, 0, 1), angle=0.0, scope='section'):
+    def pose(self, select=None, point=(0, 0, 0), direction=(0, 0, 1), angle=0.0, scope='section'):
         scope = self.scope(scope)
-        idx, spec = self.chosen(scope, sel)
+        idx, spec = self.chosen(scope, select)
         c, R = np.asarray(point, float), rotation(direction, float(angle))
         self.items[scope] = [p.moved(pos=R @ (p.pos - c) + c, matrix=R @ p.matrix) if i in idx else p
                              for i, p in enumerate(self.items[scope])]
-        self.record('pose', sel=spec, scope=scope, point=list(map(float, point)),
+        self.record('pose', select=spec, scope=scope, point=list(map(float, point)),
                     direction=list(map(float, unit(direction))), angle=float(angle), count=len(idx))
 
     def axis(self, point=(0, 0, 0), direction=(0, 0, 1), length=None, radius=None):
@@ -195,11 +191,12 @@ class Build:
         self.axis_requests.append((tuple(map(float, point)), tuple(map(float, unit(direction))), length, radius))
         self.codes.add(AXIS_CODE)
 
-    def closeup(self, sel='section', scope=None, view='home', margin=1.25):
+    def closeup(self, select='section', scope=None, view='home', margin=1.25):
         scope = self.scope(scope)
-        idx, spec = self.chosen(scope, sel)
-        self.camera = cam.fitted(self.bounds(scope, idx), view, margin=margin, note=f'close-up on {spec}')
-        self.record('closeup', sel=spec, scope=scope, view=view)
+        idx, spec = self.chosen(scope, select)
+        self.camera = cam.fitted(self.bounds(scope, idx), view, aspect=self.aspect,
+                                 margin=margin, note=f'close-up on {spec}')
+        self.record('closeup', select=spec, scope=scope, view=view)
 
     def cutaway(self, view='front', depth=0.5):
         self.cutaway_request = (view, float(depth))
@@ -208,10 +205,10 @@ class Build:
     # -- connection overlays (pyldraw3; isolated section, source geometry) ----
     def _connections(self):
         if self.parent:
-            raise ValueError('Connection overlays render the isolated section; use context isolate')
+            raise ValueError('Connection overlays render the section alone; omit parent')
         if self.parts is None:
             raise ValueError('Connection overlays need the LDraw library index')
-        if getattr(self, '_conn', None) is None:
+        if self._conn is None:
             from . import connections
             ins = connections.inspect_section(self.parts, self.scene.source, self.section.name)
             self._conn = (ins, connections.contacts(ins))
@@ -302,16 +299,19 @@ class Build:
             self.items['section'].append(rod)
             info = dict(point=list(point), direction=list(direction), length=length, radius=radius, frame='section')
             if self.parent:
-                info['in_parent'] = [dict(zip(('point', 'direction'), (list(map(lambda v: round(float(v), 3), a)) for a in
-                                                                       map_axis(point, direction, p.pos, p.matrix))))
-                                     for p in self.items['parent'] if key(p.ref) == key(self.section.name)]
+                info['in_parent'] = []
+                for placement in self.items['parent']:
+                    if key(placement.ref) == key(self.section.name):
+                        parent_point, parent_direction = map_axis(point, direction, placement.pos, placement.matrix)
+                        info['in_parent'].append(dict(point=parent_point.round(3).tolist(),
+                                                      direction=parent_direction.round(3).tolist()))
             self.record('axis', **info)
 
     def plan(self) -> Plan:
         self._add_axes()
         rendered = 'parent' if self.parent else 'section'
         if self.parent and any(p.final for p in self.items['section']):
-            raise ValueError("In a parent context, highlight parent placements (scope parent, e.g. sel=section)")
+            raise ValueError("In a parent context, highlight parent placements with scope='parent' and select='section'")
         if self.fade and not any(p.final for p in self.items[rendered]):
             raise ValueError('ghost needs a highlight: something must stay solid')
         header = [*self.section.header(), SYNTHETIC]
@@ -321,9 +321,10 @@ class Build:
         if keep:
             mapping = step_map(self.items['section'])
             first, last = self.keep_steps
-            wanted = [s for s in mapping if (first is None or s >= first) and (last is None or s <= last)]
+            wanted = [s for s in mapping if (first is None or s >= first) and (last is None or s <= last)
+                      and (self.step_numbers is None or s in self.step_numbers)]
             if not wanted:
-                raise ValueError(f'No non-empty source steps in {first}..{last}; steps with parts: {sorted(mapping)}')
+                raise ValueError(f'No requested non-empty source steps; steps with parts: {sorted(mapping)}')
             steps = [(s, mapping[s]) for s in wanted]
         if self.parent:
             self.parent.lines = emit([*self.parent.header(), SYNTHETIC], self.items['parent'], keep_steps=False)
@@ -353,58 +354,104 @@ class Build:
                     parent_placements=parent_placements, bounds=bounds)
 
 
+class Layer(TypedDict, total=False):
+    """An ordered inspection operation. Options depend on ``layer``."""
+
+    layer: Required[str]
+    select: str
+    scope: str
+    colour: str | int
+    first: int
+    last: int
+    numbers: list[int]
+    point: list[float]
+    direction: list[float]
+    angle: float
+    length: float
+    radius: float
+    view: str
+    margin: float
+    depth: float
+    min_depth: float
+
+
 LAYERS = {
-    'highlight': ('sel', 'scope'),
+    'highlight': ('select', 'scope'),
     'ghost': (),
-    'steps': ('first', 'last'),
-    'xray': ('sel', 'colour', 'scope'),
-    'recolour': ('sel', 'colour', 'scope'),
-    'stud_map': ('sel', 'scope'),
-    'pose': ('sel', 'point', 'direction', 'angle', 'scope'),
+    'steps': ('first', 'last', 'numbers'),
+    'xray': ('select', 'colour', 'scope'),
+    'recolour': ('select', 'colour', 'scope'),
+    'stud_map': ('select', 'scope'),
+    'pose': ('select', 'point', 'direction', 'angle', 'scope'),
     'axis': ('point', 'direction', 'length', 'radius'),
-    'closeup': ('sel', 'scope', 'view', 'margin'),
+    'closeup': ('select', 'scope', 'view', 'margin'),
     'cutaway': ('view', 'depth'),
     'contacts': ('radius',),
     'components': (),
     'collisions': ('min_depth',),
 }
-VECTORS = {'point', 'direction'}
-NUMBERS = {'first', 'last', 'angle', 'length', 'radius', 'depth', 'margin', 'min_depth'}
 
 
-def parse_layer(text):
-    """`name` or `name:key=value;key=value`, e.g. `xray:sel=colour:15;colour=Xray_Glass`.
-
-    Vectors are comma-separated (`point=0,-18,0`).
-    """
-    if isinstance(text, dict):
-        spec = dict(text)
-        name = spec.pop('layer')
-    else:
-        name, _, rest = str(text).partition(':')
-        spec = {}
-        for part in filter(None, (p.strip() for p in rest.split(';'))):
-            k, eq, v = part.partition('=')
-            if not eq:
-                raise ValueError(f'Layer option {part!r} must be key=value')
-            spec[k.strip()] = v.strip()
-    name = name.strip()
+def validate_layer(value) -> Layer:
+    """Validate structured input without parsing a second option language."""
+    if not isinstance(value, dict) or not isinstance(value.get('layer'), str):
+        raise ValueError('Each layer must be an object with a "layer" name')
+    name = value['layer']
     if name not in LAYERS:
         raise ValueError(f'Unknown layer {name!r}; available: {", ".join(LAYERS)}')
-    unknown = set(spec) - set(LAYERS[name])
-    if unknown:
-        raise ValueError(f'Layer {name!r} takes {", ".join(LAYERS[name]) or "no options"}; got {", ".join(sorted(unknown))}')
-    for k, v in list(spec.items()):
-        if k in VECTORS and isinstance(v, str):
-            spec[k] = tuple(float(x) for x in v.split(','))
-        elif k in NUMBERS and isinstance(v, str):
-            spec[k] = float(v) if k not in ('first', 'last') else int(v)
-    return dict(layer=name, **spec)
+    spec = fields(value, ('layer', *LAYERS[name]), name=f'{name} layer')
+    if name in ('xray', 'recolour', 'pose') and 'select' not in spec:
+        raise ValueError(f'{name} needs a select field, such as "all" or "colour:15"')
+    if 'select' in spec:
+        text(spec['select'], 'select')
+        select_placements(spec['select'], [], section='section.ldr')
+    if 'scope' in spec and spec['scope'] not in ('section', 'parent'):
+        raise ValueError('scope must be section or parent')
+    for key in ('point', 'direction'):
+        if key in spec:
+            spec[key] = list(vector(spec[key], key, nonzero=key == 'direction'))
+    for key in ('first', 'last', 'angle', 'length', 'radius', 'depth', 'margin', 'min_depth'):
+        if key in spec:
+            number(spec[key], key, integer=key in ('first', 'last'),
+                   positive=key in ('first', 'last', 'length', 'radius', 'margin'),
+                   minimum=0 if key in ('depth', 'min_depth') else None,
+                   maximum=1 if key == 'depth' else None)
+    if 'numbers' in spec:
+        if not isinstance(spec['numbers'], list) or not spec['numbers']:
+            raise ValueError('steps numbers must be a nonempty list of source steps')
+        for step in spec['numbers']:
+            number(step, 'step', integer=True, positive=True)
+        if 'first' in spec or 'last' in spec:
+            raise ValueError('Use steps numbers or first/last, not both')
+        spec['numbers'] = sorted(set(spec['numbers']))
+    if spec.get('first', 1) > spec.get('last', float('inf')):
+        raise ValueError('steps first must not exceed last')
+    if 'view' in spec:
+        cam.preset(spec['view'])
+    if name == 'cutaway' and spec.get('view') == 'home':
+        raise ValueError('Cutaways need an axis-aligned view: front, back, left, right, top, bottom')
+    if 'colour' in spec:
+        if isinstance(spec['colour'], bool) or not isinstance(spec['colour'], (str, int)):
+            raise ValueError('colour must be an LDraw code or swatch name')
+        spec['colour'] = resolve(spec['colour'])
+    return spec
 
 
-def apply(build: Build, layers):
-    for raw in layers:
-        spec = parse_layer(raw)
-        name = spec.pop('layer')
-        getattr(build, name)(**spec)
+def validate_layers(layers) -> list[Layer]:
+    if not isinstance(layers, (list, tuple)):
+        raise ValueError('layers must be a list of objects')
+    result = [validate_layer(layer) for layer in layers]
+    names = {layer['layer'] for layer in result}
+    if 'steps' in names and names & {'highlight', 'ghost'}:
+        raise ValueError('Highlight/ghost layers cannot be combined with source-step rendering')
+    if 'ghost' in names and 'highlight' not in names:
+        raise ValueError('ghost needs a highlight: something must stay solid')
+    return result
+
+
+def apply(build: Build, layers) -> Build:
+    for layer in validate_layers(layers):
+        options = dict(layer)
+        name = options.pop('layer')
+        getattr(build, name)(**options)
     return build

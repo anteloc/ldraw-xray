@@ -145,6 +145,31 @@ class Document:
         except KeyError:
             raise KeyError(f'Section not found: {name!r}') from None
 
+    def model_section(self, name=None):
+        """Resolve an optional section name to a model block."""
+        block = self.root if name is None else self.block(name)
+        if block.is_part:
+            raise ValueError(f'{block.name!r} is a part definition, not a model section')
+        return block
+
+    def parent_name(self, section, name=None, *, useful=False, required=True):
+        """Resolve an explicit or unique parent, never silently choose among several."""
+        parents = self.parents_of(section)
+        if name is not None:
+            block = self.model_section(name)
+            if block.name not in parents:
+                raise ValueError(f'{block.name!r} does not place {section!r}')
+            return block.name
+        candidates = [parent for parent, hits in parents.items()
+                      if not useful or len(self.block(parent).placements()) > len(hits)]
+        if len(candidates) > 1:
+            raise ValueError(f'Multiple parents of {section!r}; choose --parent NAME: {", ".join(candidates)}')
+        if not candidates:
+            if required:
+                raise ValueError(f'No parent places {section!r}; omit --parent to render it alone')
+            return None
+        return candidates[0]
+
     def is_model(self, ref):
         return key(ref) in self.blocks and not is_part_name(ref)
 

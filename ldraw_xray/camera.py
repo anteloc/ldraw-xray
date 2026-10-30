@@ -6,9 +6,11 @@ and the front view looks toward +Z.
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 
 import numpy as np
+
+from .validation import boolean, fields, number, vector
 
 VIEWS = ('home', 'front', 'back', 'left', 'right', 'top', 'bottom')
 DIRECTIONS = {'home': (1, -1, -1), 'front': (0, 0, -1), 'back': (0, 0, 1), 'left': (-1, 0, 0),
@@ -28,11 +30,33 @@ class Camera:
     zplanes: tuple[float, float] | None = None
     note: str = ''
 
+    def __post_init__(self):
+        if self.view is not None and self.view not in VIEWS:
+            raise ValueError(f'Unknown view {self.view!r}; use one of {", ".join(VIEWS)}')
+        number(self.fov, 'camera fov', positive=True, maximum=179)
+        boolean(self.orthographic, 'camera orthographic')
+        up = np.asarray(vector(self.up, 'camera up', nonzero=True))
+        if (self.position is None) != (self.target is None):
+            raise ValueError('Explicit cameras need both position and target')
+        if self.position is not None:
+            position = np.asarray(vector(self.position, 'camera position'))
+            target = np.asarray(vector(self.target, 'camera target'))
+            if np.linalg.norm(np.cross(target - position, up)) < 1e-12:
+                raise ValueError('Camera position and target must differ, and up must not parallel the view')
+        if self.zplanes is not None:
+            near, far = vector(self.zplanes, 'camera zplanes', size=2)
+            if not 1 <= near < far:
+                raise ValueError('camera zplanes must satisfy 1 <= near < far')
+        if not isinstance(self.note, str):
+            raise ValueError('camera note must be text')
+
     def argv(self):
+        args = ['--fov', f'{self.fov:g}']
         if self.position is None:
-            return ['--viewpoint', self.view or 'home']
-        args = ['--fov', f'{self.fov:g}', '--camera-position-ldraw',
-                *(f'{v:.4f}' for v in (*self.position, *self.target, *self.up))]
+            args += ['--viewpoint', self.view or 'home']
+        else:
+            args += ['--camera-position-ldraw',
+                     *(f'{v:.4f}' for v in (*self.position, *self.target, *self.up))]
         if self.orthographic:
             args.append('--orthographic')
         if self.zplanes:
@@ -40,14 +64,15 @@ class Camera:
         return args
 
     def to_dict(self):
-        return {k: v for k, v in asdict(self).items() if v not in (None, '', ())}
+        return {key: list(value) if isinstance(value, tuple) else value
+                for key, value in asdict(self).items() if value not in (None, '', ())}
 
     @classmethod
     def from_dict(cls, data):
-        data = dict(data)
+        data = fields(data, cls.__dataclass_fields__, name='camera')
         for k in ('position', 'target', 'up', 'zplanes'):
             if data.get(k) is not None:
-                data[k] = tuple(float(v) for v in data[k])
+                data[k] = vector(data[k], f'camera {k}', size=2 if k == 'zplanes' else 3)
         return cls(**data)
 
 
@@ -84,7 +109,7 @@ def fitted(bounds, view='home', *, fov=30.0, aspect=4 / 3, margin=1.08, note='fi
     tan_v = math.tan(math.radians(fov / 2))
     tan_h = tan_v * aspect
     lo, hi = bounds.low, bounds.high
-    points = bounds.points if getattr(bounds, 'points', None) is not None else np.array(
+    points = bounds.points if bounds.points is not None else np.array(
         [[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
     rel = np.asarray(points, float) - centre
     depth = rel @ back

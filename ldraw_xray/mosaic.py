@@ -17,6 +17,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from .library import atomic_write
+from .validation import boolean, number
 
 PAGE = '#eef1f4'
 INK = '#17272c'
@@ -50,31 +51,40 @@ def _lines(draw, text, width, font):
     return result + ([current] if current else [])
 
 
-def compose_mosaic(manifest, output, *, columns=2, panel_width=800, force=False, backdrop=PAGE):
+def compose_mosaic(manifest, output, *, columns=2, panel_width=800, force=False, backdrop=PAGE, write_sidecar=True):
     """Compose a board from a panel manifest (JSON file or dict with a `base` directory).
 
     Manifest: {title, mode: views|analysis, legend?: [str], panels: [{image, label, camera?, subject?, state?}]}.
     Analysis mode requires one shared camera and subject plus identical image sizes.
     """
     if isinstance(manifest, dict):
-        spec, base, manifest_path = manifest, Path(manifest.get('base', '.')).resolve(), None
+        spec = manifest
+        base = Path(manifest.get('base', manifest.get('output', '.'))).resolve()
+        manifest_path = None
     else:
         manifest_path = Path(manifest).resolve()
         spec, base = json.loads(manifest_path.read_text()), manifest_path.parent
+    if not isinstance(spec, dict):
+        raise ValueError('Mosaic manifest must be an object')
+    boolean(force, 'force')
+    boolean(write_sidecar, 'write_sidecar')
     output = Path(output).resolve()
     sidecar = output.with_suffix('.json')
     panels, mode = spec.get('panels'), spec.get('mode', 'views')
-    if mode not in {'views', 'analysis'}:
+    if mode not in ('views', 'analysis'):
         raise ValueError('Mosaic mode must be views or analysis')
     if not isinstance(panels, list) or not 2 <= len(panels) <= 12:
         raise ValueError('Choose 2 to 12 panels')
-    if not 1 <= columns <= 4 or not 320 <= panel_width <= 1600:
-        raise ValueError('Use 1-4 columns and panel width 320-1600')
+    number(columns, 'columns', integer=True, minimum=1, maximum=4)
+    number(panel_width, 'panel_width', integer=True, minimum=320, maximum=1600)
     if output.suffix.lower() != '.png':
         raise ValueError('Mosaic output must be a PNG')
     title = spec.get('title', 'Inspection mosaic')
     if not isinstance(title, str) or len(title) > 120:
         raise ValueError('Mosaic title must be text of at most 120 characters')
+    legend = spec.get('legend', [])
+    if not isinstance(legend, list) or any(not isinstance(line, str) for line in legend):
+        raise ValueError('Mosaic legend must be a list of strings')
     images, entries, inputs = [], [], {manifest_path} if manifest_path else set()
     for panel in panels:
         if not isinstance(panel, dict) or not isinstance(panel.get('image'), str):
@@ -95,9 +105,9 @@ def compose_mosaic(manifest, output, *, columns=2, panel_width=800, force=False,
         entries.append(dict(panel=len(entries) + 1, label=label, image=str(path), sha256=hashlib.sha256(data).hexdigest(),
                             size=list(image.size), camera=panel.get('camera'), subject=panel.get('subject'),
                             state=panel.get('state')))
-    if output in inputs or sidecar in inputs:
+    if output in inputs or (write_sidecar and sidecar in inputs):
         raise ValueError('Mosaic outputs must not overwrite inputs')
-    if not force and (output.exists() or sidecar.exists()):
+    if not force and (output.exists() or (write_sidecar and sidecar.exists())):
         raise ValueError('Mosaic output exists; use force')
     if mode == 'analysis':
         first = panels[0]
@@ -156,7 +166,8 @@ def compose_mosaic(manifest, output, *, columns=2, panel_width=800, force=False,
                   panels=entries, legend=legend, duplicates=duplicates, note=note,
                   manifest=str(manifest_path) if manifest_path else None,
                   manifest_sha256=hashlib.sha256(manifest_path.read_bytes()).hexdigest() if manifest_path else None,
-                  image_sha256=hashlib.sha256(output.read_bytes()).hexdigest(), visual_review='pending',
+                  image_sha256=hashlib.sha256(output.read_bytes()).hexdigest(),
                   limitations=['Boards do not prove fit, clearance or stability; inspect full-resolution panels for small details.'])
-    atomic_write(sidecar, json.dumps(report, indent=2) + '\n')
+    if write_sidecar:
+        atomic_write(sidecar, json.dumps(report, indent=2) + '\n')
     return report

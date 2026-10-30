@@ -1,7 +1,6 @@
 """Post-processing of LeoCAD's transparent PNGs into images an agent can read.
 
-Flattening on a light backdrop keeps ghosted and transparent parts visible
-(the same image on dark grey lost 76% of a ghosted parent's outline). The
+Flattening on a light backdrop keeps ghosted and transparent parts visible. The
 outline is traced from opaque pixels only: LDraw draws no edge lines along
 curved silhouettes, so white curved shells vanish on light backdrops, while
 tracing semi-transparent pixels turns ghosted context into speckle.

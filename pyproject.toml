@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ldraw-xray"
 version = "0.1.0"
-description = "Composable LeoCAD renders for agents with vision: highlights, x-ray, out-of-band colouring, axes, poses, cutaways and mosaics"
+description = "Render and inspect LDraw models with LeoCAD"
 readme = "README.md"
 license-files = ["LICENSE", "CC-BY-SA-4.0"]
 requires-python = ">=3.12"
@@ -13,6 +13,7 @@ dependencies = [
     "pyldraw3==1.7.0",
     "numpy>=2",
     "pillow>=11,<13",
+    "platformdirs>=4.3.8",
 ]
 
 [project.optional-dependencies]

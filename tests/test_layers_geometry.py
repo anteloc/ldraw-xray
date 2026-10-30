@@ -3,12 +3,12 @@ import pytest
 
 from ldraw_xray import camera as cam
 from ldraw_xray.geometry import Bounds, basis_y, map_axis, rotation, stud_bucket
-from ldraw_xray.layers import Build, Scene, apply, parse_layer
+from ldraw_xray.layers import Build, Scene, apply, validate_layer
 from ldraw_xray.mpd import Block
 
 
-def plan(model, layers, context='isolate', section='wing.ldr'):
-    return apply(Build(Scene(model, section, context)), layers).plan()
+def plan(model, layers, parent=None, section='wing.ldr'):
+    return apply(Build(Scene(model, section, parent)), layers).plan()
 
 
 def rendered_lines(p):
@@ -31,24 +31,24 @@ def test_axis_maps_like_the_75060_cockpit():
 
 
 def test_highlight_moves_selection_to_final_step(model):
-    p = plan(model, ['highlight:sel=step:3'])
+    p = plan(model, [{'layer': 'highlight', 'select': 'step:3'}])
     assert p.final_step == 2 and p.highlight and not p.fade
     lines = rendered_lines(p)
     assert lines.index('0 STEP') < lines.index(next(l for l in lines if l.endswith('3022.dat')))
 
 
 def test_parent_context_defaults(model):
-    p = plan(model, ['highlight', 'ghost'], context='parent')
+    p = plan(model, [{'layer': 'highlight'}, {'layer': 'ghost'}], parent='root.ldr')
     assert p.submodel == 'root.ldr' and p.fade and p.final_step == 2
     assert len(p.parent_placements) == 2
     with pytest.raises(ValueError, match='ghost needs a highlight'):
-        plan(model, ['ghost'])
+        plan(model, [{'layer': 'ghost'}])
     with pytest.raises(ValueError, match='source-step'):
-        plan(model, ['steps', 'highlight:sel=all'])
+        plan(model, [{'layer': 'steps'}, {'layer': 'highlight', 'select': 'all'}])
 
 
 def test_xray_recolours_inside_children(model):
-    p = plan(model, ['xray:sel=ref:wing.ldr'], section='root.ldr')
+    p = plan(model, [{'layer': 'xray', 'select': 'ref:wing.ldr'}], section='root.ldr')
     refs = [l.split()[-1] for l in rendered_lines(p) if l.startswith('1 ')]
     colours = [l.split()[1] for l in rendered_lines(p) if l.startswith('1 ')]
     assert 'wing.ldr' not in refs                     # flattened so explicit colours can change
@@ -56,31 +56,40 @@ def test_xray_recolours_inside_children(model):
 
 
 def test_stud_map_counts(model):
-    p = plan(model, ['stud_map'])
+    p = plan(model, [{'layer': 'stud_map'}])
     record = p.records[0]
     assert record['counts'] == {'up': 2, '+x': 1} or record['counts'] == {'up': 2, '-x': 1}
     assert {e['code'] for e in p.legend} >= {9007}
 
 
 def test_pose_rotates_about_axis(model):
-    p = plan(model, ['pose:sel=step:3;point=20,-8,0;direction=0,1,0;angle=90'])
+    p = plan(model, [dict(layer='pose', select='step:3', point=[20, -8, 0], direction=[0, 1, 0], angle=90)])
     line = next(l for l in rendered_lines(p) if l.endswith('3022.dat'))
     assert line.split()[2:5] == ['20', '-8', '0']     # on the axis: position unchanged
     assert line.split()[5:14] == ['0', '0', '1', '0', '1', '0', '-1', '0', '0']
 
 
 def test_axis_adds_marker_block(model):
-    p = plan(model, ['axis:point=0,-12,0;direction=1,0,0;length=100;radius=2'])
+    p = plan(model, [dict(layer='axis', point=[0, -12, 0], direction=[1, 0, 0], length=100, radius=2)])
     assert 'xray-axis-0.dat' in p.doc.blocks
     assert any(l.startswith('1 9008 ') for l in rendered_lines(p))
 
 
-def test_parse_layer_errors():
-    assert parse_layer('pose:point=1,2,3;angle=45') == dict(layer='pose', point=(1.0, 2.0, 3.0), angle=45.0)
-    with pytest.raises(ValueError, match='Unknown layer'):
-        parse_layer('glow')
-    with pytest.raises(ValueError, match='takes'):
-        parse_layer('ghost:sel=all')
+@pytest.mark.parametrize('layer, message', [
+    ('highlight:sel=all', 'object'),
+    ({'layer': 'glow'}, 'Unknown layer'),
+    ({'layer': 'ghost', 'select': 'all'}, 'Unknown'),
+    ({'layer': 'xray'}, 'select'),
+    ({'layer': 'axis', 'direction': [0, 0, 0]}, 'non-zero'),
+    ({'layer': 'axis', 'point': [1, 2]}, '3 numbers'),
+    ({'layer': 'pose', 'select': 'all', 'angle': '45'}, 'finite number'),
+    ({'layer': 'cutaway', 'depth': 2}, 'at most'),
+    ({'layer': 'steps', 'first': 4, 'last': 3}, 'first'),
+    ({'layer': 'stud_map', 'select': 'step:5-3'}, 'range'),
+])
+def test_structured_layer_errors(layer, message):
+    with pytest.raises(ValueError, match=message):
+        validate_layer(layer)
 
 
 def test_fitted_camera_contains_points_and_cutaway_plane():

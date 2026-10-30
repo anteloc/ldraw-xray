@@ -1,182 +1,153 @@
 # ldraw-xray
 
-Visual rendering tools tailored for agents to inspect LDraw models.
-
-ldraw-xray renders an LDraw model or one of its submodels through LeoCAD. It
-combines **inspection layers**:
-
-- a magenta highlight;
-- a ghosted parent;
-- x-ray transparency;
-- out-of-band (non-LEGO) colouring;
-- an axis rod;
-- rigid poses;
-- cutaways;
-- connection overlays.
-
-It writes readable PNGs, a provenance manifest and a labelled mosaic. It is a
-Python package and a CLI (`ldraw-xray`), and every command prints one JSON
-object.
-
-It only makes pictures and the data a picture needs. It does not judge models:
-images come from synthetic copies, never from valid models.
+Render LDraw models with LeoCAD so an agent can inspect their geometry. Highlight
+parts, see through a shell, inspect source steps, or make a labelled inspection
+board. The source model and parts library are never modified.
 
 ## Install
 
+Requires Python ≥3.12, an LDraw parts library, and LeoCAD (tested with 25.09).
+
 ```sh
-uv venv && uv pip install -e '.[test]'
+uv venv
+uv pip install -e '.[test]'
+source .venv/bin/activate
+export LDRAW_DIR=/path/to/ldraw
+ldraw-xray doctor
 ```
 
-**Requirements:**
-
-- Python ≥ 3.12;
-- an LDraw parts library;
-- LeoCAD (tested with 25.09);
-- optionally, an LDCad shadow library for connector metadata.
-
-## Configuration
-
-Each setting is resolved in this order: CLI flag, then environment variable,
-then default. The variable names match ldraw-nova's.
+`doctor` reports missing dependencies even when setup is incomplete. Optionally
+set `LDRAW_SHADOW` to an LDCad shadow library for better connector coverage.
 
 | Setting | Flag | Environment | Default |
 |---|---|---|---|
-| LDraw library (**required**) | `-l`, `--ldraw-lib` | `LDRAW_DIR`, then `LDRAWDIR` | none |
-| LDCad shadow library (optional; a directory, `.zip` or `.csl`) | `--shadow` (repeatable), `--no-shadow` | `LDRAW_SHADOW` (`os.pathsep` list) | none |
-| LeoCAD | `--leocad` | `LEOCAD` | `leocad` on PATH, then the macOS app |
-| Cache for the pyldraw3 index | `--cache-dir` | `LDRAW_XRAY_CACHE` | user cache `ldraw-xray` |
+| Parts library | `--library` | `LDRAW_DIR`, then `LDRAWDIR` | Required for rendering |
+| Shadow libraries | Repeat `--shadow`; `--no-shadow` disables them | `LDRAW_SHADOW`, separated by the OS path separator | Built-in connector detection |
+| LeoCAD executable | `--leocad` | `LEOCAD` | PATH, then the macOS app |
+| Index cache | `--cache-dir` | `LDRAW_XRAY_CACHE` | User cache directory |
 
-`ldraw-xray doctor` shows what was found and which layers can run.
+Flags override environment variables. Configuration flags work before the
+command or after its final subcommand. `python -m ldraw_xray` is equivalent to
+`ldraw-xray`.
 
-The library is never written. Renders use a wrapper directory:
-
-- symlinks to the library;
-- an `LDConfig.ldr` extended with the xray colours;
-- an `unofficial/parts/` folder for embedded and synthetic parts.
-
-## Quick start
+## First render
 
 ```sh
-ldraw-xray sections model.mpd                          # find section names, steps, parents
-ldraw-xray render model.mpd --section "wing.ldr" --layer stud_map --views home front --out out/
-ldraw-xray render model.mpd --section "wing.ldr" --context parent --layer highlight --layer ghost --out out/
-ldraw-xray board --preset overview --file model.mpd --section "wing.ldr" --steps 3 7 --out board/
-ldraw-xray board board/recipe.json --out board2/       # edit the written recipe, re-run it
+ldraw-xray sections model.mpd
+ldraw-xray render model.mpd --output out/
+ldraw-xray render model.mpd --section wing.ldr --view home --view front --output views/
+ldraw-xray render model.mpd --section wing.ldr --highlight 'step:3' --ghost --output highlight/
+ldraw-xray render model.mpd --section wing.ldr --parent --highlight section --ghost --output context/
 ```
 
-The same in Python:
+Omit `--section` for the root model and `--view` for the home view. Bare
+`--parent` uses the unique parent; if several parents exist, the error lists
+them so you can choose `--parent NAME`.
 
-```python
-from ldraw_xray import Session, Scene
-s = Session()                                          # configuration from the environment
-s.render(Scene('model.mpd', 'wing.ldr'), ['xray:sel=colour:15', 'highlight:sel=step:3'], ['home'], 'out/')
+| Render flag | Effect |
+|---|---|
+| `--highlight SELECTOR` | Magenta edges on selected parts |
+| `--ghost` | Fade everything outside the highlight; requires `--highlight` |
+| `--xray SELECTOR` | Make selected parts transparent |
+| `--stud-map` | Colour parts by stud direction |
+| `--steps [NUMBERS]` | One image per source step, e.g. `--steps 3,7-9`; bare `--steps` includes all nonempty steps |
+
+X-ray and stud mapping are alternatives on the CLI. They run before highlighting
+and ghosting. Steps cannot combine with highlight or ghost and require an
+isolated section. Repeated `--view` flags produce the requested views.
+
+## Inspection boards
+
+Each task exposes only its relevant options; use `board TASK --help` for details.
+
+```sh
+ldraw-xray board overview model.mpd --section wing.ldr --steps 3,7 --output overview/
+ldraw-xray board stud-map model.mpd --section wing.ldr --output studs/
+ldraw-xray board xray model.mpd --select 'colour:15' --highlight 'colour:4' --output xray/
+ldraw-xray board pivot model.mpd --point 0 -18 0 --direction 0 0 1 --moving '!part:3894' --output pivot/
+ldraw-xray board cutaway model.mpd --view front --depths 0.35 0.5 0.65 --output cuts/
+ldraw-xray board run overview/recipe.json --output replay/
 ```
 
-## Layers
+Overview, stud-map, and pivot boards include useful parent context when unique.
+They omit it when none exists and require `--parent NAME` when ambiguous.
+Use `--no-mosaic` for panels only. Edit the saved recipe for advanced layers,
+styles, or cameras; see the [reference](docs/reference.md).
 
-Layers apply in order and combine freely. The selection syntax is in the next
-section.
+## Select parts
 
-| Layer | Options | Shows |
-|---|---|---|
-| `highlight` | `sel`, `scope` | Selected parts drawn with **magenta edges**. In a parent context, it defaults to the section's placements |
-| `ghost` | | Everything not highlighted, faded to light grey |
-| `steps` | `first`, `last` | Source steps, one image each; new parts have magenta edges. Isolated section only |
-| `xray` | `sel`, `colour` (default 47 Trans-Clear, or `Xray_Glass`) | Selected parts see-through, recursing into children with explicit colours |
-| `recolour` | `sel`, `colour` (`group:A`..`F`, a swatch name or a code) | Agent-defined groups in out-of-band colours |
-| `stud_map` | `sel` | Each part coloured by where its studs point (legend below) |
-| `pose` | `sel`, `point`, `direction`, `angle` | Rigid rotation of the selection about an axis |
-| `axis` | `point`, `direction`, `length`, `radius` | **Neon-green rod** along an axis (section coordinates). Shown in parent renders too |
-| `closeup` | `sel`, `scope`, `view`, `margin` | Camera fitted to the selection's bounds (useful inside a huge parent) |
-| `cutaway` | `view` (axis-aligned), `depth` 0–1 | Camera near plane slices the model open at that depth |
-| `components` | | Connected groups except the largest, recoloured (floating groups, or detection gaps) |
-| `contacts` | `radius` | Marker spheres at detected connector contacts: green = confirmed, olive = heuristic |
-| `collisions` | `min_depth` | Box-overlap candidates without a detected contact, in raspberry |
+Quote selectors in a shell, especially when they contain `*`, `!`, or `|`.
 
-The CLI form is `name:key=value;key=value`. Vectors are written `x,y,z`, for
-example `pose:sel=!part:3894;point=0,-18,0;direction=0,0,1;angle=45`.
-
-## Selections
-
-Terms are combined with `|` (union); `!term` excludes. A selection made only of
-exclusions starts from `all`.
-
-| Term | Selects |
+| Selector | Selects |
 |---|---|
 | `all` | Every placement |
-| `section` | The inspected section's placements, in a parent context |
-| `line:12,15,20-24` | Source line numbers |
-| `step:3-5` | Source steps (counting every `0 STEP`) |
-| `part:3001*` | A glob on the part file name |
-| `colour:15,4` | Colour codes |
-| `ref:NAME` | An exact reference |
+| `section` | Placements of the inspected section inside its parent |
+| `line:12,15,20-24` | Source-file line numbers |
+| `step:3-5` | Source step numbers, including empty steps in the numbering |
+| `part:3001*` | Part-reference glob; `.dat` is optional |
+| `colour:15,4` | Colour codes written on placement lines |
+| `ref:wing.ldr` | Exact part or submodel reference |
 
-## Presets and boards
+`|` includes either term; `!` excludes a term. For example,
+`'part:3001*|colour:15|!step:1'`. Exclusions apply after all inclusions; a selector
+containing only exclusions starts from `all`. Empty selections are reported in
+the image's notes.
 
-`board --preset NAME` writes `recipe.json` and runs it. A board folder contains:
+## Outputs and data commands
 
-- `panels/` (flattened PNGs; `raw/` holds the transparent originals and
-  `synthetic/` the MPDs);
-- `manifest.json`;
-- `mosaic.png` with its `mosaic.json`.
+Every render or board writes `panels/`, a replayable `recipe.json`, and one
+`manifest.json`. Boards with 2–12 images also write `mosaic.png`; larger jobs
+need `--no-mosaic`. `--keep-intermediates` adds transparent PNGs, synthetic models,
+and a source-section copy under `intermediates/`.
 
-| Preset | Options | Panels |
-|---|---|---|
-| `overview` | `--steps` | Parent ghost, isolated home view, chosen steps |
-| `snot` | `--steps` | Parent highlight, stud map (home and front), chosen steps |
-| `xray` | `--sel`, `--colour`, `--highlight` | As built, then the selection see-through from three views |
-| `pivot` | `--point`, `--direction`, `--moving`, `--hardware`, `--angles` | Axis rod + hardware, parent with rod, pose sweep from one fixed camera |
-| `cutaway` | `--view`, `--depths` | Uncut view, then cuts at each depth |
+`--force` replaces generated files while preserving unrelated files. Requests
+are validated before rendering; completed jobs are staged before publication.
+Saved recipes resolve the source path, section, parents, and render settings.
+Manifest artifact paths are relative to the output directory; CLI results give
+absolute paths.
 
-`ldraw-xray connections` and `ldraw-xray axes` print the data behind the overlays:
-
-- contacts, connected groups and overlap candidates;
-- coaxial-connector axis candidates you can pass to `axis` and `pose`.
-
-## Colours
-
-**Stud map:**
-
-| Studs point | Colour |
-|---|---|
-| Up | `#EDD4F7` |
-| +X | `#FF0078` |
-| −X | `#FF5500` |
-| +Z | `#0500FF` |
-| −Z | `#00FFE0` |
-| Down | `#BCF747` |
-| Odd angle | `#7C49FF` |
-
-**Other swatches:**
-
-- Axis rod: `#39FF14`.
-- Groups A–F: `#3370FF`, `#00FFA6`, `#66540A`, `#00E6FF`, `#EC80FF`, `#6847B2`.
-- Contacts: `#00B236` confirmed, `#A6B236` heuristic.
-- Collisions: `#B2124A`.
-- Glass: `#8099FF`, alpha 110.
-
-Every swatch is at least ΔE 16 (CIE76) from every LDConfig colour; check with
-`ldraw-xray palette --check`.
-
-## Render style
-
-The style is pinned because LeoCAD otherwise uses the GUI's saved preferences:
-
-```
---stud-style 6 -aec -cc 1.0 -ldv 0.5 --shading full --aa-samples 4 --line-width 2
+```sh
+ldraw-xray connections model.mpd --section wing.ldr
+ldraw-xray axes model.mpd --section wing.ldr
+ldraw-xray palette --check
+ldraw-xray mosaic views/manifest.json --output mosaic.png
 ```
 
-After rendering, each image is flattened onto `#EEF1F4` with a 2 px `#2A2F36`
-outline traced from opaque pixels. Cameras fit the parts' box corners, so nothing
-is cropped and the steps of one section share a scale. Override any of these
-with `--style key=value`.
+`sections`, `palette` without `--check`, and `mosaic` do not need LeoCAD or a
+parts library. The standalone mosaic command writes its metadata to a JSON
+file beside the PNG.
 
-See [docs/agents.md](docs/agents.md) for how to choose layers and read the
-images.
+Commands print one JSON result to stdout. Errors are JSON on stderr: exit 2
+means invalid input or configuration; exit 1 means execution failed. Help is
+plain text. Renders show geometry; connection reports and overlap candidates
+are evidence to inspect, not proof of fit, clutch, or stability.
 
-## Licence
+## Python
 
-- Code: AGPL-3.0 (`LICENSE`).
-- Documentation: CC BY-SA 4.0 (`CC-BY-SA-4.0`).
-- The mosaic composer and the pyldraw3 connection-frame adapter are adapted
-  from ldraw-nova (same author).
+```python
+from pathlib import Path
+from ldraw_xray import Session
+
+session = Session()
+manifest = session.render(
+    "model.mpd",
+    section="wing.ldr",
+    output="out",
+    layers=[{"layer": "xray", "select": "colour:15"}],
+    views=["home", "front"],
+)
+images = [Path(manifest["output"]) / panel["image"] for panel in manifest["panels"]]
+session.board("out/recipe.json", output="replay")
+```
+
+`XrayConfig`, `Style`, `Camera`, and `compose_mosaic` are also public APIs.
+Advanced Python calls use the same layer objects as recipes.
+
+## Development and licence
+
+Run `python -m pytest -q`. Renderer, library, and shadow tests skip when their
+external dependencies are unavailable. CLI and recipe tests use small fixtures.
+
+Code: AGPL-3.0 ([LICENSE](LICENSE)). Documentation: CC BY-SA 4.0
+([CC-BY-SA-4.0](CC-BY-SA-4.0)). The mosaic composer and pyldraw3 connection-frame
+adapter are adapted from ldraw-nova by the same author.

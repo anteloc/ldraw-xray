@@ -15,27 +15,36 @@ only exclusions starts from `all`. Example: `colour:15|part:3062*|!step:1`.
 from __future__ import annotations
 
 import fnmatch
+import re
 
 from .mpd import key
 
 
-def _numbers(text):
+def numbers(text):
+    """Positive source numbers, e.g. ``3,7-9``; reject malformed ranges."""
+    if not isinstance(text, str) or not re.fullmatch(r'\s*\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*\s*', text):
+        raise ValueError('Expected source numbers such as 3,7-9')
     out = set()
     for chunk in text.split(','):
         chunk = chunk.strip()
-        if not chunk:
-            continue
-        if '-' in chunk[1:]:
+        if '-' in chunk:
             a, b = chunk.split('-', 1)
+            if int(a) < 1 or int(b) < int(a):
+                raise ValueError(f'Invalid source range: {chunk!r}')
             out.update(range(int(a), int(b) + 1))
         else:
-            out.add(int(chunk))
+            value = int(chunk)
+            if value < 1:
+                raise ValueError('Source numbers start at 1')
+            out.add(value)
     return out
 
 
 def _term(term, placements, section):
     name, _, arg = term.partition(':')
     name = name.strip().casefold()
+    if name in ('all', 'section') and ':' in term:
+        raise ValueError(f'{name} does not take a value')
     if name == 'all':
         return set(range(len(placements)))
     if name == 'section':
@@ -45,10 +54,10 @@ def _term(term, placements, section):
     if not arg:
         raise ValueError(f'Selection term {term!r} needs a value, e.g. {name}:...')
     if name == 'line':
-        wanted = _numbers(arg)
+        wanted = numbers(arg)
         return {i for i, p in enumerate(placements) if p.line in wanted}
     if name == 'step':
-        wanted = _numbers(arg)
+        wanted = numbers(arg)
         return {i for i, p in enumerate(placements) if p.step in wanted}
     if name == 'colour' or name == 'color':
         wanted = {c.strip() for c in arg.split(',')}
@@ -66,10 +75,14 @@ def _term(term, placements, section):
 
 def select(spec, placements, *, section=None):
     """Indices of `placements` chosen by `spec` (a string; None means all)."""
-    if spec is None or str(spec).strip() == '':
+    if spec is None:
         return set(range(len(placements)))
+    if not isinstance(spec, str) or not spec.strip():
+        raise ValueError('Selection must be nonempty text, such as all or step:3')
     include, exclude = set(), set()
-    terms = [t.strip() for t in str(spec).split('|') if t.strip()]
+    terms = [t.strip() for t in spec.split('|')]
+    if not all(terms):
+        raise ValueError('Selection has an empty term around |')
     positives = [t for t in terms if not t.startswith('!')]
     for t in positives:
         include |= _term(t, placements, section)

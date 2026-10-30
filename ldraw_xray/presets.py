@@ -1,80 +1,110 @@
-"""Starting-point recipes for common inspections. Agents edit the written recipe.json and re-run it."""
+"""Small recipe builders for common inspection tasks."""
 from __future__ import annotations
 
-from .mpd import Document
+from pathlib import Path
+
+from .mpd import Document, step_map
+from .validation import number, vector
 
 
-def _parent(source, section):
-    """First block placing the section, unless it holds nothing else (then a parent view adds nothing)."""
+def _subject(source, section):
+    source = Path(source).expanduser().resolve()
     doc = Document.read(source)
-    for name, hits in doc.parents_of(section).items():
-        if len(doc.block(name).placements()) > len(hits):
-            return name
-    return None
+    return source, doc, doc.model_section(section).name
 
 
-def overview(source, section, *, steps=(), parent=None, **_):
-    """Where it sits, what it looks like, how it is built."""
-    parent = parent or _parent(source, section)
+def _parent(doc, section, parent):
+    return doc.parent_name(section, parent, useful=True, required=False)
+
+
+def _step_panels(doc, section, steps):
+    available = step_map(doc.block(section).placements())
+    if steps == 'all':
+        requested = list(available)
+    else:
+        requested = sorted(set(steps))
+        for step in requested:
+            number(step, 'step', integer=True, positive=True)
+        requested = [step for step in requested if step in available]
+    if steps and not requested:
+        raise ValueError(f'No requested nonempty source steps; steps with parts: {list(available)}')
+    return [dict(label=f'Source step {step}: new parts edged magenta',
+                 layers=[dict(layer='steps', numbers=[step])], view='home') for step in requested]
+
+
+def overview(source, section=None, *, steps=(), parent=None):
+    """Where it sits, what it looks like, and how it is built."""
+    source, doc, section = _subject(source, section)
+    parent = _parent(doc, section, parent)
     panels = []
     if parent:
-        panels.append(dict(label=f'In {parent}: the section highlighted, the rest ghosted', context='parent',
-                           layers=['highlight', 'ghost'], view='home'))
-    panels.append(dict(label='Isolated, home view', layers=[], view='home'))
-    for s in steps:
-        panels.append(dict(label=f'Source step {s}: new parts edged magenta', layers=[f'steps:first={s};last={s}'], view='home'))
+        panels.append(dict(label=f'In {parent}: highlighted section, ghosted surroundings', parent=parent,
+                           layers=[dict(layer='highlight'), dict(layer='ghost')], view='home'))
+    panels.append(dict(label='Isolated, home view', view='home'))
+    panels.extend(_step_panels(doc, section, steps))
     if len(panels) < 4:
-        panels.append(dict(label='Isolated, front view', layers=[], view='front'))
-    return dict(title=f'{section}: overview', source=str(source), section=section, parent=parent, panels=panels)
+        panels.append(dict(label='Isolated, front view', view='front'))
+    return dict(title=f'{section}: overview', source=str(source), section=section, panels=panels)
 
 
-def snot(source, section, *, steps=(), parent=None, **_):
-    """Stud directions in non-LEGO colours, plus where the parent puts the section."""
-    parent = parent or _parent(source, section)
+def stud_map(source, section=None, *, steps=(), parent=None):
+    """Stud directions in section coordinates, plus the section in its parent."""
+    source, doc, section = _subject(source, section)
+    parent = _parent(doc, section, parent)
     panels = []
     if parent:
-        panels.append(dict(label=f'In {parent}: the section highlighted', context='parent', layers=['highlight'], view='home'))
-    panels += [dict(label='Stud-direction map, home view (section frame)', layers=['stud_map'], view='home'),
-               dict(label='Stud-direction map, front view (section frame)', layers=['stud_map'], view='front')]
-    for s in steps:
-        panels.append(dict(label=f'Source step {s}: new parts edged magenta', layers=[f'steps:first={s};last={s}'], view='home'))
-    return dict(title=f'{section}: stud directions', source=str(source), section=section, parent=parent, panels=panels)
+        panels.append(dict(label=f'In {parent}: highlighted section', parent=parent,
+                           layers=[dict(layer='highlight')], view='home'))
+    for view in ('home', 'front'):
+        panels.append(dict(label=f'Stud directions, {view} view (section coordinates)',
+                           layers=[dict(layer='stud_map')], view=view))
+    panels.extend(_step_panels(doc, section, steps))
+    return dict(title=f'{section}: stud directions', source=str(source), section=section, panels=panels)
 
 
-def xray(source, section, *, sel, colour='47', highlight=None, **_):
-    """See through a shell (`sel`) to what it hides; optionally edge the hidden parts magenta."""
-    layers = [f'xray:sel={sel};colour={colour}'] + ([f'highlight:sel={highlight}'] if highlight else [])
-    return dict(title=f'{section}: x-ray of {sel}', source=str(source), section=section, panels=[
-        dict(label='Isolated, home view (as built)', layers=[], view='home'),
-        dict(label=f'X-ray: {sel} see-through', layers=layers, view='home'),
-        dict(label=f'X-ray: {sel} see-through, front view', layers=layers, view='front'),
-        dict(label=f'X-ray: {sel} see-through, top view', layers=layers, view='top')])
+def xray(source, section=None, *, select, colour=47, highlight=None):
+    """The original model followed by three views through the selected shell."""
+    source, _, section = _subject(source, section)
+    layers = [dict(layer='xray', select=select, colour=colour)]
+    if highlight is not None:
+        layers.append(dict(layer='highlight', select=highlight))
+    panels = [dict(label='As built, home view', view='home')]
+    panels.extend(dict(label=f'X-ray, {view} view', layers=layers, view=view) for view in ('home', 'front', 'top'))
+    return dict(title=f'{section}: x-ray', source=str(source), section=section, panels=panels)
 
 
-def pivot(source, section, *, point, direction, moving, hardware=None, angles=(0, 45, 90), parent=None, **_):
-    """Axis rod, joint hardware edged magenta, and a pose sweep from one fixed camera."""
-    parent = parent or _parent(source, section)
-    p, d = ','.join(f'{v:g}' for v in point), ','.join(f'{v:g}' for v in direction)
-    axis = f'axis:point={p};direction={d}'
-    marks = [axis] + ([f'highlight:sel={hardware}'] if hardware else [])
-    panels = [dict(label='Axis rod (green) and joint hardware (magenta edges)', layers=marks, view='home')]
+def pivot(source, section=None, *, point, direction, moving, hardware=None, angles=(0, 45, 90), parent=None):
+    """Axis marker, optional parent context, and a pose sweep with one fixed camera."""
+    source, doc, section = _subject(source, section)
+    parent = _parent(doc, section, parent)
+    point = list(vector(point, 'point'))
+    direction = list(vector(direction, 'direction', nonzero=True))
+    if not isinstance(angles, (list, tuple)) or not angles:
+        raise ValueError('angles must be a nonempty list')
+    axis = dict(layer='axis', point=point, direction=direction)
+    marks = [axis]
+    if hardware is not None:
+        marks.append(dict(layer='highlight', select=hardware))
+    panels = [dict(label='Axis marker and joint hardware', layers=marks, view='home')]
     if parent:
-        panels.append(dict(label=f'In {parent}: axis rod through the highlighted section', context='parent',
-                           layers=['highlight', 'ghost', axis], view='home'))
-    for a in angles:
-        panels.append(dict(label=f'Pose {a:g} degrees about the axis (moving: {moving})',
-                           layers=[f'pose:sel={moving};point={p};direction={d};angle={a:g}', *marks],
-                           camera=dict(fixed='home')))
-    return dict(title=f'{section}: pivot', source=str(source), section=section, parent=parent, panels=panels,
+        panels.append(dict(label=f'In {parent}: axis through highlighted section', parent=parent,
+                           layers=[dict(layer='highlight'), dict(layer='ghost'), axis], view='home'))
+    for angle in angles:
+        number(angle, 'angle')
+        pose = dict(layer='pose', select=moving, point=point, direction=direction, angle=angle)
+        panels.append(dict(label=f'Pose {angle:g} degrees', layers=[pose, *marks], camera=dict(fixed='home')))
+    return dict(title=f'{section}: pivot', source=str(source), section=section, panels=panels,
                 columns=3 if len(panels) > 4 else 2, panel_width=640 if len(panels) > 4 else 800)
 
 
-def cutaway(source, section, *, view='front', depths=(0.35, 0.5, 0.65), **_):
-    """Slice the section open with the camera's near plane at several depths."""
-    panels = [dict(label=f'Isolated, {view} view (uncut)', layers=[], view=view)]
-    for d in depths:
-        panels.append(dict(label=f'Cut at depth {d:g} from the {view}', layers=[f'cutaway:view={view};depth={d:g}']))
-    return dict(title=f'{section}: cutaway from the {view}', source=str(source), section=section, panels=panels)
-
-
-PRESETS = dict(overview=overview, snot=snot, xray=xray, pivot=pivot, cutaway=cutaway)
+def cutaway(source, section=None, *, view='front', depths=(0.35, 0.5, 0.65)):
+    """Uncut view followed by cuts at each requested depth."""
+    source, _, section = _subject(source, section)
+    if not isinstance(depths, (list, tuple)) or not depths:
+        raise ValueError('depths must be a nonempty list')
+    panels = [dict(label=f'Uncut, {view} view', view=view)]
+    for depth in depths:
+        number(depth, 'depth', minimum=0, maximum=1)
+        panels.append(dict(label=f'Cut at depth {depth:g} from the {view}',
+                           layers=[dict(layer='cutaway', view=view, depth=depth)], view=view))
+    return dict(title=f'{section}: cutaway', source=str(source), section=section, panels=panels)
