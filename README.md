@@ -87,27 +87,33 @@ Flags win over environment variables. Set the variables once, in your shell prof
 
 ## Quick start
 
+The examples and pictures below use `8071.mpd`, a Technic bucket truck whose sections include
+`8071 - cabin.ldr`, `8071 - front-axle.ldr` and `8071 - crane.ldr`. Quote names with spaces.
+
 ```sh
 # what's in the model: sections (submodels), their steps and parents
-ldraw-xray sections plane.mpd
+ldraw-xray sections 8071.mpd
 
 # render the whole model
-ldraw-xray render plane.mpd --output out/
+ldraw-xray render 8071.mpd --output out/
 
-# render one submodel, from two sides
-ldraw-xray render plane.mpd --section wing.ldr --view home --view front --output out/wing/
+# render one section, from two sides
+ldraw-xray render 8071.mpd --section '8071 - cabin.ldr' --view home --view front --output out/cabin/
 ```
 
-Open `out/wing/panels/*.png`. Every command prints a JSON result with the paths of what it wrote:
+![The whole 8071 truck, home view](img/render.png)
+
+Open `out/cabin/panels/*.png`. Every command prints a JSON result with the paths of what it
+wrote:
 
 ```json
 {
-  "output": "/home/me/out/wing",
-  "recipe": "/home/me/out/wing/recipe.json",
-  "manifest": "/home/me/out/wing/manifest.json",
+  "output": "/home/me/out/cabin",
+  "recipe": "/home/me/out/cabin/recipe.json",
+  "manifest": "/home/me/out/cabin/manifest.json",
   "images": [
-    {"image": "/home/me/out/wing/panels/01-home-view.png", "shows": "home view", "view": "home", ...},
-    {"image": "/home/me/out/wing/panels/02-front-view.png", "shows": "front view", "view": "front", ...}
+    {"image": "/home/me/out/cabin/panels/01-home-view.png", "shows": "home view", "view": "home", ...},
+    {"image": "/home/me/out/cabin/panels/02-front-view.png", "shows": "front view", "view": "front", ...}
   ]
 }
 ```
@@ -122,42 +128,52 @@ Open `out/wing/panels/*.png`. Every command prints a JSON result with the paths 
 Magenta edges on selected parts; `--ghost` fades the rest so they stand out.
 
 ```sh
-# the parts added in step 3
-ldraw-xray render plane.mpd --section wing.ldr --highlight 'step:3' --output out/
+# the steering parts of the front axle, everything else ghosted
+ldraw-xray render 8071.mpd --section '8071 - front-axle.ldr' \
+  --highlight 'ref:8071 - steering-shaft.ldr|ref:steerArm.ldr' --ghost --output out/
 
-# every 1x2 plate, everything else ghosted
-ldraw-xray render plane.mpd --section wing.ldr --highlight 'part:3023' --ghost --output out/
+# the parts added in step 3
+ldraw-xray render 8071.mpd --section '8071 - front-axle.ldr' --highlight 'step:3' --output out/
 ```
 
-### A submodel in its parent
+![Front axle: steering shaft and arms highlighted, the rest ghosted](img/highlight-ghost.png)
 
-`--parent` renders the parent model, so you see where the submodel sits. Highlight `section` to
+### A section in its parent
+
+`--parent` renders the parent model, so you see where the section sits. Highlight `section` to
 pick it out:
 
 ```sh
-# the wing inside the fuselage, everything around it ghosted
-ldraw-xray render plane.mpd --section wing.ldr --parent --highlight section --ghost --output out/
+# the front axle inside the truck, everything around it ghosted
+ldraw-xray render 8071.mpd --section '8071 - front-axle.ldr' --parent --highlight section --ghost --output out/
 
-# a submodel used in several places: name the parent
-ldraw-xray render plane.mpd --section wheel.ldr --parent landing-gear.ldr --highlight section --output out/
+# a section used in several places: name the parent
+ldraw-xray render 8071.mpd --section '8071 - headlight-lamp.ldr' --parent headLightLeft.ldr \
+  --highlight section --output out/
 ```
 
-Bare `--parent` works when there's only one parent; otherwise the error lists them.
+![The front axle highlighted inside the ghosted truck](img/parent.png)
+
+Bare `--parent` works when there's only one parent; otherwise the error lists them:
+
+```
+{"error": "Multiple parents of '8071 - headlight-lamp.ldr'; choose --parent NAME: headLightLeft.ldr, headLightRight.ldr"}
+```
 
 ### X-ray: see through a shell
 
 `--xray` makes the selected parts transparent, to see what's behind them. Select the shell by
-colour, part, step or line ([selectors](#select-parts)).
+submodel, colour, part, step or line ([selectors](#select-parts)).
 
 ```sh
-# white bodywork turned to clear glass, from the top
-ldraw-xray render car.mpd --section body.ldr --xray 'colour:15' --view top --output out/
+# the cabin turned to clear glass, seen from the top
+ldraw-xray render 8071.mpd --xray 'ref:8071 - cabin.ldr' --view top --output out/
 
-# x-ray the body and highlight the gear you're looking for
-ldraw-xray render car.mpd --section body.ldr --xray 'colour:15' --highlight 'part:3647' --output out/
+# x-ray the cabin and highlight the front axle under it
+ldraw-xray render 8071.mpd --xray 'ref:8071 - cabin.ldr' --highlight 'ref:8071 - front-axle.ldr' --output out/
 
-# x-ray everything except the steering parts
-ldraw-xray render car.mpd --section chassis.ldr --xray '!part:32*' --output out/
+# x-ray the whole cabin except the seats and steering wheel
+ldraw-xray render 8071.mpd --section '8071 - cabin.ldr' --xray '!ref:chair.ldr|!ref:steeringWheel.ldr' --output out/
 ```
 
 For a side-by-side comparison, the `xray` board shows the model as built, then x-rayed from
@@ -165,20 +181,27 @@ three sides. `--colour` picks the glass: `47` (Trans-Clear, default), any LDraw 
 `Xray_Glass`, a tinted glass that stands out more:
 
 ```sh
-ldraw-xray board xray car.mpd --section body.ldr --select 'colour:15' --colour Xray_Glass \
-  --highlight 'part:3647' --output out/xray/
+ldraw-xray board xray 8071.mpd --select 'ref:8071 - cabin.ldr' --colour Xray_Glass --output out/xray/
 ```
+
+![X-ray board: the truck as built, then with the cabin as blue glass from three sides](img/board-xray.png)
 
 ### Build steps
 
 One image per source step, with the parts new in that step edged in magenta:
 
 ```sh
-ldraw-xray render plane.mpd --section wing.ldr --steps --output out/steps/          # every step with parts
-ldraw-xray render plane.mpd --section wing.ldr --steps 3,7-9 --output out/steps/    # just these
+# every step with parts
+ldraw-xray render 8071.mpd --section '8071 - front-axle.ldr' --steps --output out/steps/
+
+# just these, side by side on one image
+ldraw-xray render 8071.mpd --section '8071 - front-axle.ldr' --steps 3,6,10,15 --output out/some-steps/
+ldraw-xray mosaic out/some-steps/manifest.json --output out/steps.png
 ```
 
-Steps keep the numbering of the source file. They render the submodel on its own (no `--parent`)
+![Front axle, source steps 3, 6, 10 and 15](img/steps.png)
+
+Steps keep the numbering of the source file. They render the section on its own (no `--parent`)
 and can't be combined with `--highlight` or `--ghost`.
 
 ### Stud directions
@@ -187,9 +210,11 @@ Colours each part by where its studs point (up, ±X, ±Z, down, at an odd angle)
 (studs-not-on-top) building:
 
 ```sh
-ldraw-xray render plane.mpd --section wing.ldr --stud-map --view home --view top --output out/
+ldraw-xray render 8071.mpd --section '8071 - cabin.ldr' --stud-map --output out/
 ldraw-xray palette          # what each colour means
 ```
+
+![Cabin coloured by stud direction](img/stud-map.png)
 
 `--stud-map` and `--xray` are alternatives: use one per render.
 
@@ -199,25 +224,31 @@ A board is a ready-made set of views on one labelled `mosaic.png`. Each task has
 see `ldraw-xray board TASK --help`.
 
 ```sh
-# where it sits, what it looks like, and selected build steps
-ldraw-xray board overview plane.mpd --section wing.ldr --steps 3,7 --output out/overview/
+# where it sits, what it looks like; --steps adds build steps
+ldraw-xray board overview 8071.mpd --section '8071 - crane.ldr' --output out/overview/
 
-# stud directions, plus the submodel in its parent
-ldraw-xray board stud-map plane.mpd --section wing.ldr --output out/studs/
+# stud directions, plus the section in its parent
+ldraw-xray board stud-map 8071.mpd --section '8071 - cabin.ldr' --output out/studs/
 
-# as built vs. x-rayed
-ldraw-xray board xray car.mpd --section body.ldr --select 'colour:15' --output out/xray/
+# as built vs. x-rayed (pictured above)
+ldraw-xray board xray 8071.mpd --select 'ref:8071 - cabin.ldr' --output out/xray/
 
-# a hinge: axis marker and the moving part at several angles, with one fixed camera
-ldraw-xray board pivot plane.mpd --section flap.ldr --point 0 -18 0 --direction 0 0 1 \
-  --moving '!part:3894' --hardware 'part:3894' --angles 0 30 60 90 --output out/pivot/
+# the crane slewing on its turntable: axis marker, then poses with one fixed camera
+ldraw-xray board pivot 8071.mpd --section '8071 - crane.ldr' --point 0 -100 30 --direction 0 1 0 \
+  --moving '!ref:craneBase.ldr' --angles 0 45 90 --output out/pivot/
 
-# slices through the model at 35%, 50% and 65% depth, seen from the front
-ldraw-xray board cutaway car.mpd --section engine.ldr --view front --depths 0.35 0.5 0.65 --output out/cuts/
+# slices through the cabin at 35%, 50% and 65% depth, seen from the front
+ldraw-xray board cutaway 8071.mpd --section '8071 - cabin.ldr' --view front --depths 0.35 0.5 0.65 --output out/cuts/
 ```
 
 `overview`, `stud-map` and `pivot` add the parent automatically when it's unique; pass
 `--parent NAME` when there are several. `--no-mosaic` writes the panels without `mosaic.png`.
+
+![Overview board: the crane in the truck, then on its own from two sides](img/board-overview.png)
+
+![Pivot board: the turntable axis, then the boom at 0, 45 and 90 degrees](img/board-pivot.png)
+
+![Cutaway board: the cabin uncut, then sliced at three depths](img/board-cutaway.png)
 
 ### Finding a pivot
 
@@ -225,8 +256,10 @@ Not sure where a hinge axis is? `axes` proposes rotation axes from coaxial conne
 axles, holes), with `point` and `direction` ready to paste into `board pivot`:
 
 ```sh
-ldraw-xray axes plane.mpd --section flap.ldr
+ldraw-xray axes 8071.mpd --section '8071 - crane.ldr'
 ```
+
+Coordinates are the section's own, in LDraw units, with −Y up.
 
 ### Recipes: tweak and replay
 
@@ -234,7 +267,7 @@ Every render and board saves a `recipe.json` that reproduces it. Edit it (labels
 colours, cameras, image size) and run it again:
 
 ```sh
-ldraw-xray board overview plane.mpd --section wing.ldr --output out/overview/
+ldraw-xray board overview 8071.mpd --section '8071 - crane.ldr' --output out/overview/
 $EDITOR out/overview/recipe.json
 ldraw-xray board run out/overview/recipe.json --output out/overview-v2/
 ```
@@ -256,7 +289,7 @@ the shell, especially when it has `*`, `!` or `|`.
 | `step:3-5` | the parts added in these steps |
 | `part:3001*` | parts by number; `*` is a wildcard and `.dat` is optional |
 | `colour:15,4` | parts by LDraw colour code |
-| `ref:wing.ldr` | an exact part or submodel name |
+| `ref:chair.ldr` | an exact part or submodel name |
 
 Combine them: `|` adds, `!` removes. Removals apply last; a selector with only removals starts
 from `all`.
@@ -264,7 +297,7 @@ from `all`.
 ```sh
 --highlight 'part:3001*|colour:15'      # 2x4 bricks, plus anything white
 --xray 'colour:15|!step:1'              # white parts, except those from step 1
---xray '!ref:engine.ldr'                # everything except the engine
+--xray '!ref:8071 - cabin.ldr'         # everything except the cabin
 ```
 
 An empty selection doesn't fail: the image notes say so.
@@ -273,10 +306,10 @@ An empty selection doesn't fail: the image notes say so.
 
 ```sh
 # contacts between parts, connected groups and overlap candidates
-ldraw-xray connections plane.mpd --section wing.ldr
+ldraw-xray connections 8071.mpd --section '8071 - front-axle.ldr'
 
 # proposed rotation axes
-ldraw-xray axes plane.mpd --section wing.ldr
+ldraw-xray axes 8071.mpd --section '8071 - front-axle.ldr'
 ```
 
 Several groups can mean a loose part, or a joint the detector doesn't know (Technic pin/axle
