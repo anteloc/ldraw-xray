@@ -1,0 +1,47 @@
+{
+  "source": "../../../../ldraw-nova/data/models-annotated/10269-1.mpd",
+  "section": "10269 - step199-212.ldr",
+  "title": "10269 primary-drive cover: sideways round disc on headlight bricks",
+  "panels": [
+    {
+      "label": "Parent 10269 motorcycle: section is the left drive cover, not a headlight nacelle",
+      "layers": [
+        {
+          "layer": "highlight",
+          "select": "section"
+        }
+      ],
+      "view": "home",
+      "parent": "10269 - main.ldr"
+    },
+    {
+      "label": "Isolated cover, front view: large disc and small dish face-on, shift linkage at the end",
+      "layers": [],
+      "view": "front"
+    },
+    {
+      "label": "Source step 8: four headlight bricks give sideways studs",
+      "layers": [
+        {
+          "layer": "steps",
+          "numbers": [
+            8
+          ]
+        }
+      ],
+      "view": "home"
+    },
+    {
+      "label": "Source step 11: 4x4 round plate ringed by corner round tiles",
+      "layers": [
+        {
+          "layer": "steps",
+          "numbers": [
+            11
+          ]
+        }
+      ],
+      "view": "home"
+    }
+  ]
+}

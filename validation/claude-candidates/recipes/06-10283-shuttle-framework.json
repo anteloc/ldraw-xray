@@ -1,0 +1,50 @@
+{
+  "source": "../../../../ldraw-nova/data/models-annotated/10283-1.mpd",
+  "section": "10283 - shuttle-421-451.ldr",
+  "title": "10283 OMS pod: coloured SNOT core under a hinged white shell",
+  "panels": [
+    {
+      "label": "Parent 10283 shuttle, ghosted: one rear OMS engine pod, placed at 45 degrees on its side",
+      "layers": [
+        {
+          "layer": "highlight",
+          "select": "section"
+        },
+        {
+          "layer": "ghost"
+        }
+      ],
+      "view": "home",
+      "parent": "10283 - shuttle.ldr"
+    },
+    {
+      "label": "Isolated pod: white curved shell (DB calls it the main body with an internal framework)",
+      "layers": [],
+      "view": "home"
+    },
+    {
+      "label": "Source step 9: coloured core of side-stud plates, studs-on-side bricks, brackets and a hinge base",
+      "layers": [
+        {
+          "layer": "steps",
+          "numbers": [
+            9
+          ]
+        }
+      ],
+      "view": "home"
+    },
+    {
+      "label": "Source step 15: curved top panels, one of them hinged, close over the core",
+      "layers": [
+        {
+          "layer": "steps",
+          "numbers": [
+            15
+          ]
+        }
+      ],
+      "view": "home"
+    }
+  ]
+}

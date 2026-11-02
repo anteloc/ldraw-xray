@@ -285,9 +285,9 @@ def test_documentation_examples(stub_session, model, tmp_path, monkeypatch):
     readme = (root / 'README.md').read_text()
     reference = (root / 'docs' / 'reference.md').read_text()
     for block in re.findall(r'```sh\n(.*?)```', readme, re.S):
-        for line in block.splitlines():
+        for line in block.replace('\\\n', '').splitlines():
             if line.startswith('ldraw-xray '):
-                parser().parse_args(shlex.split(line)[1:])
+                parser().parse_args(shlex.split(line, comments=True)[1:])
     monkeypatch.chdir(tmp_path)
     for index, block in enumerate(re.findall(r'```json\n(.*?)```', reference, re.S)):
         value = json.loads(block)
